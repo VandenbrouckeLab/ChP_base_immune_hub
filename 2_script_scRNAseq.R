@@ -8,6 +8,7 @@ library('gridExtra')
 library('scater')
 library('DisneyTools')
 library('RColorBrewer')
+library('ggrepel')
 library("ggthemes")
 library("scales")
 library("ggpubr")
@@ -22,6 +23,8 @@ library('modes')
 library("dplyr")
 library("stringr")
 
+library('clusterProfiler')
+library('org.Mm.eg.db')
 
 ################################################################################
 ########## GENERAL
@@ -921,7 +924,7 @@ wantedGenes<-c("Otx2","Fras1","Plvap","Kcnj8","Dpep1","Igfbp6","Smoc2","Adgre1",
                "Klrb1c","Cd209a","Ccr7","Xcr1","Icos","Ly6c2","S100a8","Mki67","Tubb3","Fabp7")
 wantedGenes<-rev(wantedGenes)
 
-D1<-DotPlot(seuratObjNew2, features = wantedGenes, cols = Colors_dotplot)
+D1<-DotPlot(seuratObjNew2, features = wantedGenes, cols = Colors_dotplot, dot.scale = 12)
 D2<-ggpar(D1, orientation = "horizontal") #ggpubr package to reorient ggplot objects
 
 pdf(file=paste0(sampleFolder,"results/QC/Paper/16_Dotplot_Otx2_horizontal_030720.pdf"), width = 15, height = 15)
@@ -984,7 +987,7 @@ for(i in names(table(allMarkers_v2$cluster))){
   markersList_v2[[i]]<-tmp[order(tmp$score, decreasing=TRUE),]
 }
 
-## Adjust names
+## Adjust names (too long for excel tabs)
 for (i in names(markersList_v2)){
   print(nchar(i))
 } #7/8/
@@ -1048,7 +1051,7 @@ seuratObj_subset_diet<-readRDS(file=paste0(sampleFolder,"Robjects/seuratObj_pape
 ##### Differential markers
 ########################################
 
-### Use the new clusters
+### Still using the original annotation (not the updated names!)
 Idents(seuratObjNew2)<-seuratObjNew2@meta.data$newClusters
 
 ########## 2. GET MARKERS ########## 
@@ -1068,7 +1071,7 @@ getDEgenes<-function(ident1, ident2){
   return(markersDiff)
 }
 
-#### Get diff markers Young vs Old #####
+#### Get diff markers LpsPos vs LpsNeg #####
 Epithelialcells_LpsPosvsLpsNeg<-getDEgenes("Epithelial Cells_LpsPos","Epithelial Cells_LpsNeg")
 Epithelialcells_LpsPosvsLpsNeg<-Epithelialcells_LpsPosvsLpsNeg[order(Epithelialcells_LpsPosvsLpsNeg$avg_logFC,decreasing = T),]
 head(Epithelialcells_LpsPosvsLpsNeg)
@@ -1132,6 +1135,12 @@ saveRDS(listDiffMarkers,file=paste0(sampleFolder,"Robjects/markersDiffSamples_Fu
 
 ### Write to Excel
 write.xlsx(listDiffMarkers, file = paste0(sampleFolder,"results/summaryDiffMarkers_Full.xlsx"))
+
+###################
+
+#### Repeat but now split per ventricle (also with original annotation, not the updated names!)
+seuratObjNew2@meta.data$newClusters2<-paste0(seuratObjNew2@meta.data$annotated_clusters,"_",seuratObjNew2@meta.data$orig.ident)
+Idents(seuratObjNew2)<-seuratObjNew2@meta.data$newClusters2
 
 #### Get diff markers LpsPosLV vs LpsNegLV #####
 Epithelialcells_LpsPosLVvsLpsNegLV<-getDEgenes("Epithelial Cells_LpsPosLat","Epithelial Cells_LpsNegLat")
@@ -1262,7 +1271,12 @@ write.xlsx(listDiffMarkers_4V_LV, file = paste0(sampleFolder,"results/summaryDif
 
 ###################################################
 
+## Combine the differential markers into 1 tab per cell type
+
 listDiffMarkers_combined<-tibble::lst()
+
+Cell_pops<-c('Epithelialcells', "Xist_CPE", "Macrophages", "Endothelialcells", "Fibroblasts_Type_1",
+             "Fibroblasts_Type_2", "Vascular_associated_cells", "NK_cells", "Dendritic_Cells")
 
 for (pop in Cell_pops){
   indices<- grep(pop, names(listDiffMarkers_4V_LV)) #Check for cell populations (in both lists or not?)
@@ -1293,10 +1307,6 @@ for (y in 1:length(listDiffMarkers_combined)) {
 listDiffMarkers_all<-rbind(listDiffMarkers_combined[[1]],listDiffMarkers_combined[[2]],listDiffMarkers_combined[[3]],
                            listDiffMarkers_combined[[4]],listDiffMarkers_combined[[5]],listDiffMarkers_combined[[6]],
                            listDiffMarkers_combined[[7]],listDiffMarkers_combined[[8]],listDiffMarkers_combined[[9]])
-
-# for (z in 1:nrow(listDiffMarkers_all)){
-#   listDiffMarkers_all$Loc_pop[z]<-paste0(listDiffMarkers_all$Cell_pop[z],"_",listDiffMarkers_all$Location[z])
-# }
 
 # Get the full list of unique genes (over all cell populations)
 gene_list<-listDiffMarkers_all$geneSymbol
@@ -1407,10 +1417,10 @@ write.xlsx(listDiffMarkers_all, file = paste0(sampleFolder,"results/summaryDiffM
 listDiffMarkers_combined<-readRDS(file=paste0(sampleFolder,"Robjects/markersDiffSamples_combined_9pops.rds"))
 listDiffMarkers_all<-readRDS(file=paste0(sampleFolder,"Robjects/markersDiffSamples_all_in_one_9pops.rds"))
 
-# !!!!!!!!Remove DE genes from Fras1+ LV!!!!!!!!!!!!!!!!
+# Remove DE genes from Fras1+ LV from figure! Only 19 cells LpsNeg and 11 cells LpsPos! Not trustworthy!
 listDiffMarkers_combined$Xist_CPE<-listDiffMarkers_combined$Xist_CPE[-which(listDiffMarkers_combined$Xist_CPE$Location == "LV"),]
 
-#Reorder lists: according to order Roos
+#Reorder lists: 
 listDiffMarkers_combined<-listDiffMarkers_combined[c(1,2,4,7,5,6,3,9,8)]
 
 Titles<-as.factor(c('Epithelial Cells', "Fras1+ Epithelial Cells",
@@ -1421,282 +1431,11 @@ Cell_pops_plot<-c("Epithelial Cells","Xist+ Epithelial Cells","Endothelial Cells
                   "Fibroblasts Type 1", "Fibroblasts Type 2","Macrophages","Dendritic Cells","NK Cells") #Order Roos
 
 #New plot Daan
-library(RColorBrewer)
-library(ggrepel)
-library(ggthemes)
-library(scales)
-Colorset<-brewer.pal(12,"Set3")
 Colorset_blind<-colorblind_pal()(8)
 Colorset_blind[8]<-"#ff08e8"
 
-myList=list()
-
-## With shared genes ##
-for (i in 1:length(listDiffMarkers_combined)) {
-  testData<-listDiffMarkers_combined[[i]]
-  testData<-testData[,c(2,6,7,8,14)]
-  testData[,"Jitter"]<-runif(length(testData$geneSymbol)) #Add random numbers for x axis uniform distribution (Jitter to see dots)
-  testData[which(testData$Location=="4V"),"Jitter"]<-testData[which(testData$Location=="4V"),"Jitter"]+1.5
-  testData<-testData[order(testData$Gene_class),]
-  
-  if (i==1){
-    testData$Gene_class<-as.factor(testData$Gene_class)
-    levels(testData$Gene_class)<-Colorset_blind[c(1,2,3,8)] #Choose 4 levels!
-    p <- ggplot(testData, aes(x=Jitter, y=avg_logFC, label = geneSymbol)) + 
-      geom_point(shape=21, fill=testData$Gene_class) + #color=Colorset[i],
-      # geom_point(color=as.character(testData$Gene_class),shape=testData$Gene_class) +
-      coord_cartesian(ylim = c(-3, 6)) +
-      geom_text(aes(x=2.2, label="4V", y=6.3), color="lightblue", hjust=0) +
-      geom_text(aes(x=-0.2, label="LV", y=6.3), color="lightblue", hjust=0) +
-      geom_vline(xintercept = 1.25, color = "lightblue", linetype = "longdash", size = 1) +
-      # geom_hline(yintercept = 0, color = "lightblue", size = 10) +
-      geom_rect(aes(xmin=-Inf,xmax=Inf,ymin=-0.24,ymax=0.24),alpha=0.01,fill="lightblue")+
-      labs(title=as.character(Titles[i])) +
-      theme(axis.title.x=element_blank(),
-            axis.text.x=element_blank(),
-            axis.ticks.x=element_blank(),
-            panel.grid.major = element_blank(), 
-            panel.grid.minor = element_blank(),
-            plot.title = element_text(hjust = 0.5,size=14))
-  } else if (i != 2 && i !=6) { #Have all 4 levels ##(i != 5 && i !=7) #Order Daan
-      testData$Gene_class<-as.factor(testData$Gene_class)
-      levels(testData$Gene_class)<-Colorset_blind[c(1,2,3,8)] #Choose 4 levels!
-      p <- ggplot(testData, aes(x=Jitter, y=avg_logFC, label = geneSymbol)) + 
-        geom_point(shape=21, fill=testData$Gene_class) + #color=Colorset[i],
-        # geom_point(color=as.character(testData$Gene_class),shape=testData$Gene_class) +
-        coord_cartesian(ylim = c(-3, 6)) +
-        geom_text(aes(x=2.2, label="4V", y=6.3), color="lightblue", hjust=0) +
-        geom_text(aes(x=-0.2, label="LV", y=6.3), color="lightblue", hjust=0) +
-        geom_vline(xintercept = 1.25, color = "lightblue", linetype = "longdash", size = 1) +
-        # geom_hline(yintercept = 0, color = "lightblue", size = 10) +
-        geom_rect(aes(xmin=-Inf,xmax=Inf,ymin=-0.24,ymax=0.24),alpha=0.01,fill="lightblue")+
-        labs(title=as.character(Titles[i])) +
-        theme(axis.title.x=element_blank(),
-              axis.title.y=element_blank(),
-              axis.text.x=element_blank(),
-              axis.ticks.x=element_blank(),
-              panel.grid.major = element_blank(), 
-              panel.grid.minor = element_blank(),
-              plot.title = element_text(hjust = 0.5,size=14)) 
-  } else { #Only have 3 levels
-    testData$Gene_class<-as.factor(testData$Gene_class)
-    levels(testData$Gene_class)<-Colorset_blind[c(1,2,8)] #Choose 3 levels
-    p <- ggplot(testData, aes(x=Jitter, y=avg_logFC, label = geneSymbol)) + 
-      geom_point(shape=21, fill=testData$Gene_class) + #color=Colorset[i],
-      # geom_point(color=as.character(testData$Gene_class),shape=testData$Gene_class) +
-      coord_cartesian(ylim = c(-3, 6), xlim = c(-0.2,2.5)) +
-      geom_text(aes(x=2.2, label="4V", y=6.3), color="lightblue", hjust=0) +
-      geom_text(aes(x=-0.2, label="LV", y=6.3), color="lightblue", hjust=0) +
-      geom_vline(xintercept = 1.25, color = "lightblue", linetype = "longdash", size = 1) +
-      # geom_hline(yintercept = 0, color = "lightblue", size = 10) +
-      geom_rect(aes(xmin=-Inf,xmax=Inf,ymin=-0.24,ymax=0.24),alpha=0.01,fill="lightblue")+
-      labs(title=as.character(Titles[i])) +
-      theme(axis.title.x=element_blank(),
-            axis.title.y=element_blank(),
-            axis.text.x=element_blank(),
-            axis.ticks.x=element_blank(),
-            panel.grid.major = element_blank(), 
-            panel.grid.minor = element_blank(),
-            plot.title = element_text(hjust = 0.5,size=14))
-  }
-  myList[[i]]<-p
-}
-
-ggsave(grid.arrange(grobs = myList, ncol = length(Titles), nrow = 1), file=paste0(sampleFolder,"results/QC/17_DE_gene_plot_fancy_new_9pops_black_colorblind1_newer_order_Roos.png"), height= 8, width = 20, dpi = 300)
-
-##################################################################################################################################
-
-## No shared genes!! ##
-for (i in 1:length(listDiffMarkers_combined)) {
-  testData<-listDiffMarkers_combined[[i]]
-  testData<-testData[,c(2,6,7,8,14)]
-  testData[,"Jitter"]<-runif(length(testData$geneSymbol)) #Add random numbers for x axis uniform distribution (Jitter to see dots)
-  testData[which(testData$Location=="4V"),"Jitter"]<-testData[which(testData$Location=="4V"),"Jitter"]+1.5
-  testData<-testData[order(testData$Gene_class),]
-  
-  testData<-testData[which(testData$Gene_class!=2),] 
-  if (i==1){
-    testData$Gene_class<-as.factor(testData$Gene_class)
-    levels(testData$Gene_class)<-Colorset_blind[c(1,3,8)] #Choose 4 levels!
-    p <- ggplot(testData, aes(x=Jitter, y=avg_logFC, label = geneSymbol)) + 
-      geom_point(shape=21, fill=testData$Gene_class) + #color=Colorset[i],
-      # geom_point(color=as.character(testData$Gene_class),shape=testData$Gene_class) +
-      coord_cartesian(ylim = c(-2.7, 3.8)) +
-      geom_text(aes(x=2.2, label="4V", y=4), color="lightblue", hjust=0) +
-      geom_text(aes(x=-0.2, label="LV", y=4), color="lightblue", hjust=0) +
-      geom_vline(xintercept = 1.25, color = "lightblue", linetype = "longdash", size = 1) +
-      # geom_hline(yintercept = 0, color = "lightblue", size = 10) +
-      geom_rect(aes(xmin=-Inf,xmax=Inf,ymin=-0.24,ymax=0.24),alpha=0.01,fill="lightblue")+
-      labs(title=as.character(Titles[i])) +
-      theme(axis.title.x=element_blank(),
-            axis.text.x=element_blank(),
-            axis.ticks.x=element_blank(),
-            panel.grid.major = element_blank(), 
-            panel.grid.minor = element_blank(),
-            plot.title = element_text(hjust = 0.5,size=14))
-  } else if (i != 2 && i !=6) { #Have all 4 levels ##(i != 5 && i !=7) #Order Daan
-    testData$Gene_class<-as.factor(testData$Gene_class)
-    levels(testData$Gene_class)<-Colorset_blind[c(1,3,8)] #Choose 4 levels!
-    p <- ggplot(testData, aes(x=Jitter, y=avg_logFC, label = geneSymbol)) + 
-      geom_point(shape=21, fill=testData$Gene_class) + #color=Colorset[i],
-      # geom_point(color=as.character(testData$Gene_class),shape=testData$Gene_class) +
-      coord_cartesian(ylim = c(-2.7, 3.8)) +
-      geom_text(aes(x=2.2, label="4V", y=4), color="lightblue", hjust=0) +
-      geom_text(aes(x=-0.2, label="LV", y=4), color="lightblue", hjust=0) +
-      geom_vline(xintercept = 1.25, color = "lightblue", linetype = "longdash", size = 1) +
-      # geom_hline(yintercept = 0, color = "lightblue", size = 10) +
-      geom_rect(aes(xmin=-Inf,xmax=Inf,ymin=-0.24,ymax=0.24),alpha=0.01,fill="lightblue")+
-      labs(title=as.character(Titles[i])) +
-      theme(axis.title.x=element_blank(),
-            axis.title.y=element_blank(),
-            axis.text.x=element_blank(),
-            axis.ticks.x=element_blank(),
-            panel.grid.major = element_blank(), 
-            panel.grid.minor = element_blank(),
-            plot.title = element_text(hjust = 0.5,size=14)) 
-  } else { #Only have 3 levels
-    testData$Gene_class<-as.factor(testData$Gene_class)
-    levels(testData$Gene_class)<-Colorset_blind[c(1,8)] #Choose 3 levels
-    p <- ggplot(testData, aes(x=Jitter, y=avg_logFC, label = geneSymbol)) + 
-      geom_point(shape=21, fill=testData$Gene_class) + #color=Colorset[i],
-      # geom_point(color=as.character(testData$Gene_class),shape=testData$Gene_class) +
-      coord_cartesian(ylim = c(-2.7, 3.8), xlim = c(-0.2,2.5)) +
-      geom_text(aes(x=2.2, label="4V", y=4), color="lightblue", hjust=0) +
-      geom_text(aes(x=-0.2, label="LV", y=4), color="lightblue", hjust=0) +
-      geom_vline(xintercept = 1.25, color = "lightblue", linetype = "longdash", size = 1) +
-      # geom_hline(yintercept = 0, color = "lightblue", size = 10) +
-      geom_rect(aes(xmin=-Inf,xmax=Inf,ymin=-0.24,ymax=0.24),alpha=0.01,fill="lightblue")+
-      labs(title=as.character(Titles[i])) +
-      theme(axis.title.x=element_blank(),
-            axis.title.y=element_blank(),
-            axis.text.x=element_blank(),
-            axis.ticks.x=element_blank(),
-            panel.grid.major = element_blank(), 
-            panel.grid.minor = element_blank(),
-            plot.title = element_text(hjust = 0.5,size=14)) 
-  }
-  myList[[i]]<-p
-}
-
-ggsave(grid.arrange(grobs = myList, ncol = length(Titles), nrow = 1), file=paste0(sampleFolder,"results/QC/17_DE_gene_plot_fancy_new_9pops_black_colorblind1_newer_no_shared_genes_order_Roos.png"), height= 8, width = 20, dpi = 300)
-
-#######################################################################################################################################
-
-## With expression data ##
-for (i in 1:length(listDiffMarkers_combined)) {
-  testData<-listDiffMarkers_combined[[i]]
-  testData<-testData[,c(2,6,7,8,14)]
-  testData[,"Jitter"]<-runif(length(testData$geneSymbol)) #Add random numbers for x axis uniform distribution (Jitter to see dots)
-  testData[which(testData$Location=="4V"),"Jitter"]<-testData[which(testData$Location=="4V"),"Jitter"]+1.5
-  testData1<-testData[which(testData$Location=="LV"),]
-  testData2<-testData[which(testData$Location=="4V"),]
-  testData1[,"Expression"]<- apply(seuratObjDaan@assays$RNA@data[testData1[,2],rownames(seuratObjDaan@meta.data[which(Idents(seuratObjDaan)==paste0(Cell_pops_plot[i],"_LpsPosLat")),])],1,function(x){mean(x)})
-  testData2[,"Expression"]<- apply(seuratObjDaan@assays$RNA@data[testData2[,2],rownames(seuratObjDaan@meta.data[which(Idents(seuratObjDaan)==paste0(Cell_pops_plot[i],"_LpsPosFour")),])],1,function(x){mean(x)})
-  testData<-rbind(testData1,testData2)
-  testData<-testData[order(testData$Expression),]
-  for (k in 1:nrow(testData)){
-    if(testData[k,"avg_logFC"]<0){
-      testData[k,"Expression"]<-testData[k,"Expression"]*-1
-    }
-  }
-  
-  if (i==1){
-    testData$Gene_class<-as.factor(testData$Gene_class)
-    levels(testData$Gene_class)<-Colorset_blind[c(1,2,3,8)] #Choose 4 levels!
-
-    p <- ggplot(testData, aes(x=Jitter, y=avg_logFC, label = geneSymbol, color=Expression)) + 
-      geom_point(shape=16) + #color=Colorset[i],
-      # geom_point(color=as.character(testData$Gene_class),shape=testData$Gene_class) +
-      scale_color_gradient2(midpoint=0, low="blue", mid="white",
-                            high="red", space ="Lab" ) +
-      coord_cartesian(ylim = c(-3, 6)) +
-      geom_text(aes(x=2.2, label="4V", y=6.3), color="lightblue", hjust=0) +
-      geom_text(aes(x=-0.2, label="LV", y=6.3), color="lightblue", hjust=0) +
-      geom_vline(xintercept = 1.25, color = "lightblue", linetype = "longdash", size = 1) +
-      # geom_hline(yintercept = 0, color = "lightblue", size = 10) +
-      geom_rect(aes(xmin=-Inf,xmax=Inf,ymin=-0.24,ymax=0.24),alpha=0.01,color = NA)+
-      labs(title=as.character(Titles[i])) +
-
-      theme(axis.title.x=element_blank(),
-            axis.text.x=element_blank(),
-            axis.ticks.x=element_blank(),
-            panel.grid.major = element_blank(), 
-            panel.grid.minor = element_blank(),
-            plot.title = element_text(hjust = 0.5,size=14)) #,legend.position = "none"
-  } else if (i==9) { #Have all 4 levels 
-    testData$Gene_class<-as.factor(testData$Gene_class)
-    levels(testData$Gene_class)<-Colorset_blind[c(1,2,3,8)] #Choose 4 levels!
-    p <- ggplot(testData, aes(x=Jitter, y=avg_logFC, label = geneSymbol, color=Expression)) + 
-      geom_point(shape=16) + #color=Colorset[i],
-      # geom_point(color=as.character(testData$Gene_class),shape=testData$Gene_class) +
-      scale_color_gradient2(midpoint=0, low="blue", mid="white",
-                            high="red", space ="Lab" ) +
-      coord_cartesian(ylim = c(-3, 6)) +
-      geom_text(aes(x=2.2, label="4V", y=6.3), color="lightblue", hjust=0) +
-      geom_text(aes(x=-0.2, label="LV", y=6.3), color="lightblue", hjust=0) +
-      geom_vline(xintercept = 1.25, color = "lightblue", linetype = "longdash", size = 1) +
-      # geom_hline(yintercept = 0, color = "lightblue", size = 10) +
-      geom_rect(aes(xmin=-Inf,xmax=Inf,ymin=-0.24,ymax=0.24),alpha=0.01,color = NA)+
-      labs(title=as.character(Titles[i])) +
-      theme(axis.title.x=element_blank(),
-            axis.title.y=element_blank(),
-            axis.text.x=element_blank(),
-            axis.ticks.x=element_blank(),
-            panel.grid.major = element_blank(), 
-            panel.grid.minor = element_blank(),
-            plot.title = element_text(hjust = 0.5,size=14))
-  } else if (i != 5 && i !=7) { #Have all 4 levels ##(i != 5 && i !=7) #Order Daan (i != 2 && i !=6) #Order Roos
-    testData$Gene_class<-as.factor(testData$Gene_class)
-    levels(testData$Gene_class)<-Colorset_blind[c(1,2,3,8)] #Choose 4 levels!
-    p <- ggplot(testData, aes(x=Jitter, y=avg_logFC, label = geneSymbol, color=Expression)) + 
-      geom_point(shape=16) + #color=Colorset[i],
-      # geom_point(color=as.character(testData$Gene_class),shape=testData$Gene_class) +
-      scale_color_gradient2(midpoint=0, low="blue", mid="white",
-                            high="red", space ="Lab" ) +
-      coord_cartesian(ylim = c(-3, 6)) +
-      geom_text(aes(x=2.2, label="4V", y=6.3), color="lightblue", hjust=0) +
-      geom_text(aes(x=-0.2, label="LV", y=6.3), color="lightblue", hjust=0) +
-      geom_vline(xintercept = 1.25, color = "lightblue", linetype = "longdash", size = 1) +
-      # geom_hline(yintercept = 0, color = "lightblue", size = 10) +
-      geom_rect(aes(xmin=-Inf,xmax=Inf,ymin=-0.24,ymax=0.24),alpha=0.01,color = NA)+
-      labs(title=as.character(Titles[i])) +
-      theme(axis.title.x=element_blank(),
-            axis.title.y=element_blank(),
-            axis.text.x=element_blank(),
-            axis.ticks.x=element_blank(),
-            panel.grid.major = element_blank(), 
-            panel.grid.minor = element_blank(),
-            plot.title = element_text(hjust = 0.5,size=14))
-  } else { #Only have 3 levels
-    testData$Gene_class<-as.factor(testData$Gene_class)
-    levels(testData$Gene_class)<-Colorset_blind[c(1,2,8)] #Choose 3 levels
-    p <- ggplot(testData, aes(x=Jitter, y=avg_logFC, label = geneSymbol, color=Expression)) + 
-      geom_point(shape=16) + #color=Colorset[i],
-      # geom_point(color=as.character(testData$Gene_class),shape=testData$Gene_class) +
-      scale_color_gradient2(midpoint=0, low="blue", mid="white",
-                            high="red", space ="Lab" ) +
-      coord_cartesian(ylim = c(-3, 6), xlim = c(-0.2,2.5)) +
-      geom_text(aes(x=2.2, label="4V", y=6.3), color="lightblue", hjust=0) +
-      geom_text(aes(x=-0.2, label="LV", y=6.3), color="lightblue", hjust=0) +
-      geom_vline(xintercept = 1.25, color = "lightblue", linetype = "longdash", size = 1) +
-      # geom_hline(yintercept = 0, color = "lightblue", size = 10) +
-      geom_rect(aes(xmin=-Inf,xmax=Inf,ymin=-0.24,ymax=0.24),alpha=0.01,color = NA)+
-      labs(title=as.character(Titles[i])) +
-      theme(axis.title.x=element_blank(),
-            axis.title.y=element_blank(),
-            axis.text.x=element_blank(),
-            axis.ticks.x=element_blank(),
-            panel.grid.major = element_blank(), 
-            panel.grid.minor = element_blank(),
-            plot.title = element_text(hjust = 0.5,size=14)) 
-  }
-  myList[[i]]<-p
-}
-
-
-#######################################################################################################################################
-
 ## Combined expression and gene class ##
+myList=list()
 myList2<-list()
 
 for (i in 1:length(listDiffMarkers_combined)) {
@@ -1707,8 +1446,8 @@ for (i in 1:length(listDiffMarkers_combined)) {
   testData1<-testData[which(testData$Location=="LV"),]
   testData2<-testData[which(testData$Location=="4V"),]
   #Expression data table
-  testData1[,"Expression"]<- apply(seuratObjDaan@assays$RNA@data[testData1[,2],rownames(seuratObjDaan@meta.data[which(Idents(seuratObjDaan)==paste0(Cell_pops_plot[i],"_LpsPosLat")),])],1,function(x){mean(x)}) #Apply mean over the rows (for each gene over all cells for that cell population)
-  testData2[,"Expression"]<- apply(seuratObjDaan@assays$RNA@data[testData2[,2],rownames(seuratObjDaan@meta.data[which(Idents(seuratObjDaan)==paste0(Cell_pops_plot[i],"_LpsPosFour")),])],1,function(x){mean(x)}) #Apply mean over the rows (for each gene over all cells for that cell population)
+  testData1[,"Expression"]<- apply(seuratObjNew2@assays$RNA@data[testData1[,2],rownames(seuratObjNew2@meta.data[which(Idents(seuratObjNew2)==paste0(Cell_pops_plot[i],"_LpsPosLat")),])],1,function(x){mean(x)}) #Apply mean over the rows (for each gene over all cells for that cell population)
+  testData2[,"Expression"]<- apply(seuratObjNew2@assays$RNA@data[testData2[,2],rownames(seuratObjNew2@meta.data[which(Idents(seuratObjNew2)==paste0(Cell_pops_plot[i],"_LpsPosFour")),])],1,function(x){mean(x)}) #Apply mean over the rows (for each gene over all cells for that cell population)
   testData<-rbind(testData1,testData2)
   testData<-testData[order(testData$Expression),] #Order on expression
   for (k in 1:nrow(testData)){
@@ -1849,31 +1588,17 @@ ggsave(grid.arrange(grobs = myList, ncol = length(Titles), nrow = 1), file=paste
 ggsave(grid.arrange(grobs = myList2, ncol = length(Titles), nrow = 1), file=paste0(sampleFolder,"results/QC/17_DE_gene_plot_final_Gene_Class.png"), height= 8, width = 20, dpi = 300)
 
 
-
-drawMultipleFeaturePlot<-function(groupName, markers, ncol, reductionType){
-  myList=list()
-  for(i in 1:length(markers)){
-    p<-drawFeaturePlot(groupName,markers[i], reductionType)
-    myList[[2]]<-p2
-  }
-  return(grid.arrange(grobs = myList, ncol = 2, nrow = 1))
-}
-
 #####################################################################################################################
 
-## Update 2023 to sc background instead of bulk
-library(clusterProfiler)
-library(org.Mm.eg.db)
-
-## Rerun GO analysis without bulk universe, but sc background 
-Background_sc<-rownames(seuratObjNew2) #17815 vs 11402 -> Stay with bulk? But doesn't contain Ccl19!!
+## GO enrichment analysis with sc background 
+Background_sc<-rownames(seuratObjNew2) 
 universe<-Background_sc
 
-## Check GO enrichment within Stalk FBs (LpsPos vs LpsNeg) 
-## Look at diff markers 4V and LV combined (not no cutoffs which was used for IPA)
+## Check GO enrichment within BBCs (LpsPos vs LpsNeg) 
+## Look at diff markers 4V and LV combined 
 listDiffMarkers<-readRDS(file=paste0(sampleFolder,"Robjects/markersDiffSamples_Full.rds"))
 
-## Stalk FBs
+## BBCs
 All_DE_in_Stalk<-enrichGO(
   as.character(listDiffMarkers$Fibroblasts_Type_2_LpsPosvsLpsNeg$geneSymbol),
   'org.Mm.eg.db',
@@ -1901,7 +1626,7 @@ dev.off()
 saveRDS(All_DE_in_Stalk, paste0(sampleFolder,"results/QC/Stalk_FB_analysis/EnrichGO_Dotplot_ALL_SCbackground_",sampleName,".rds"))
 write.xlsx(All_DE_in_Stalk@result,file=paste0(sampleFolder,"results/QC/Stalk_FB_analysis/EnrichGO_results_ALL_SCbackground_",sampleName,".xlsx"))
 
-## Filter
+## Filter to only BP
 All_DE_in_Stalk_filtered<-All_DE_in_Stalk
 All_DE_in_Stalk_filtered@result<-All_DE_in_Stalk_filtered@result[-which(All_DE_in_Stalk_filtered@result$ONTOLOGY == "MF" | All_DE_in_Stalk_filtered@result$ONTOLOGY == "CC"),]
 D3_filtered<-dotplot(All_DE_in_Stalk_filtered, split="ONTOLOGY", showCategory = 30 ) + facet_grid(ONTOLOGY~., scale="free")
@@ -1912,7 +1637,7 @@ write.xlsx(All_DE_in_Stalk_filtered@result,file=paste0(sampleFolder,"results/QC/
 
 #########################################################################################################
 
-## Check gene list Daan chemokines 
+## Check gene list chemokines 
 Daan_list<-read.xlsx("1.Documentation/Chemokine list for ChP BBCs.xlsx", sheet = 2)
 
 ###First letter upper case
@@ -1920,10 +1645,11 @@ firstup <- function(x) {
   substr(x, 1, 1) <- toupper(substr(x, 1, 1))
   x
 }
+
 Figure_genes<-firstup(tolower(Daan_list$Chemokines))
-#Ccl21a and Ccr4 in raw Data; Ccl13 no mouse ortholog; Cxcl11 not present??
 Figure_genes<-intersect(Figure_genes,rownames(seuratObjNew2))
-# Create dotplot
+
+# Create dotplot, featureplots and violoin plots
 Colors_dotplot<-c("#071AE5","#F50635") #030720
 D1<-DotPlot(seuratObjNew, features = rev(Figure_genes), cols = Colors_dotplot) + RotatedAxis()
 
@@ -1938,7 +1664,6 @@ for (feature in Figure_genes) {
 
 dev.off()
 
-## Additional (05/2023)
 pdf(file=paste0(sampleFolder,"results/QC/Violinplots_chemokines_2023_",sampleName,".pdf"), height = 10, width = 20)
 
 for (feature in c(Figure_genes,"Dpp4")) {
